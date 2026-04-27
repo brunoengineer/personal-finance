@@ -1,0 +1,92 @@
+:root {
+    --color-income: #198754;
+    --color-expense: #dc3545;
+}
+
+body {
+    background-color: #f0f2f5;
+    min-height: 100vh;
+}
+
+.navbar-brand {
+    font-weight: 700;
+    letter-spacing: 0.03em;
+}
+
+/* Dashboard patrimônio */
+.patrimonio-value {
+    font-size: 3.5rem;
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    line-height: 1.1;
+}
+
+/* Category breakdown bars */
+.color-swatch {
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    border-radius: 3px;
+    vertical-align: middle;
+    border: 1px solid rgba(0, 0, 0, 0.1);
+    flex-shrink: 0;
+}
+
+/* Inline category badge used in transaction rows */
+.badge-category {
+    font-size: 0.7rem;
+    font-weight: 500;
+    padding: 2px 7px;
+    border-radius: 3px;
+    color: #fff;
+    display: inline-block;
+    line-height: 1.4;
+}
+
+/* Transaction amount colours */
+.transaction-amount-income  { color: var(--color-income);  font-weight: 600; }
+.transaction-amount-expense { color: var(--color-expense); font-weight: 600; }
+
+/* Month navigator on Transactions page */
+.month-nav {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+
+.month-nav h4 {
+    min-width: 190px;
+    text-align: center;
+    margin: 0;
+    font-weight: 600;
+}
+
+/* Card refinements */
+.card {
+    border: none;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.07);
+}
+
+.card-header {
+    background-color: #fff;
+    border-bottom: 1px solid #e9ecef;
+}
+
+.list-group-item {
+    border-left: none;
+    border-right: none;
+}
+
+.list-group-item:first-child { border-top: none; }
+
+/* Settings color input */
+input[type="color"].form-control-color {
+    height: 31px;
+    padding: 2px 4px;
+    cursor: pointer;
+}
+
+@media (max-width: 576px) {
+    .patrimonio-value { font-size: 2.5rem; }
+    .month-nav h4     { min-width: 140px; }
+}
