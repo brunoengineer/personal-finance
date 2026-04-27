@@ -1,4 +1,7 @@
 let _editBalanceModal;
+let _patrimonioChart = null;
+let _categoryChart   = null;
+let _monthlyChart    = null;
 
 document.addEventListener('DOMContentLoaded', () => {
     _editBalanceModal = new bootstrap.Modal(document.getElementById('editBalanceModal'));
@@ -17,9 +20,14 @@ function render() {
     _renderPatrimonio(data);
     _renderAccounts(data);
     _renderMonthSummary(data, year, month);
-    _renderCategoryBreakdown(data, year, month);
+    _renderCategoryChart(data, year, month);
+    _renderPatrimonioChart(data);
+    _renderMonthlyChart(data);
+    _renderMonthlyHistory(data);
     _renderRecentTransactions(data);
 }
+
+// ── Patrimônio total ──────────────────────────────────────────────────────────
 
 function _renderPatrimonio(data) {
     const total = data.accounts.reduce((s, a) => s + (a.balance || 0), 0);
@@ -27,6 +35,8 @@ function _renderPatrimonio(data) {
     el.textContent = formatEUR(total);
     el.className   = `patrimonio-value ${total >= 0 ? 'text-success' : 'text-danger'}`;
 }
+
+// ── Account cards ─────────────────────────────────────────────────────────────
 
 function _renderAccounts(data) {
     const row = document.getElementById('accounts-row');
@@ -52,6 +62,8 @@ function _renderAccounts(data) {
     `).join('');
 }
 
+// ── This month summary ────────────────────────────────────────────────────────
+
 function _renderMonthSummary(data, year, month) {
     const txs      = _monthTransactions(data, year, month);
     const income   = txs.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0);
@@ -65,12 +77,19 @@ function _renderMonthSummary(data, year, month) {
     netEl.className   = `fs-5 fw-bold ${net >= 0 ? 'text-success' : 'text-danger'}`;
 }
 
-function _renderCategoryBreakdown(data, year, month) {
-    const expenses  = _monthTransactions(data, year, month).filter(t => t.type === 'expense');
-    const container = document.getElementById('category-breakdown');
+// ── Category doughnut chart ───────────────────────────────────────────────────
+
+function _renderCategoryChart(data, year, month) {
+    const noData  = document.getElementById('category-no-data');
+    const wrapper = document.getElementById('category-chart-wrapper');
+
+    if (_categoryChart) { _categoryChart.destroy(); _categoryChart = null; }
+
+    const expenses = _monthTransactions(data, year, month).filter(t => t.type === 'expense');
 
     if (expenses.length === 0) {
-        container.innerHTML = '<p class="text-muted mb-0">No expenses this month.</p>';
+        noData.style.display  = '';
+        wrapper.style.display = 'none';
         return;
     }
 
@@ -92,26 +111,287 @@ function _renderCategoryBreakdown(data, year, month) {
 
     const sorted = Object.values(byCategory).sort((a, b) => b.total - a.total);
 
-    container.innerHTML = sorted.map(cat => {
-        const pct = total > 0 ? (cat.total / total * 100).toFixed(1) : 0;
-        return `
-            <div class="mb-3">
-                <div class="d-flex justify-content-between align-items-center mb-1">
-                    <span class="d-flex align-items-center gap-2">
-                        <span class="color-swatch" style="background:${cat.color}"></span>
-                        ${escapeHtml(cat.name)}
-                    </span>
-                    <span class="fw-semibold">${formatEUR(cat.total)}</span>
-                </div>
-                <div class="progress" style="height:6px">
-                    <div class="progress-bar" role="progressbar"
-                        style="width:${pct}%;background-color:${cat.color}"
-                        aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100">
-                    </div>
-                </div>
-            </div>`;
-    }).join('');
+    noData.style.display  = 'none';
+    wrapper.style.display = '';
+
+    _categoryChart = new Chart(document.getElementById('category-chart'), {
+        type: 'doughnut',
+        data: {
+            labels: sorted.map(c => c.name),
+            datasets: [{
+                data: sorted.map(c => c.total),
+                backgroundColor: sorted.map(c => c.color),
+                borderWidth: 2,
+                borderColor: '#fff',
+                hoverBorderWidth: 3
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: true,
+            cutout: '58%',
+            plugins: {
+                legend: {
+                    position: 'right',
+                    labels: {
+                        generateLabels: chart => {
+                            const ds = chart.data.datasets[0];
+                            return chart.data.labels.map((label, i) => ({
+                                text: `${label}  ${formatEUR(ds.data[i])}`,
+                                fillStyle: ds.backgroundColor[i],
+                                strokeStyle: '#fff',
+                                lineWidth: 2,
+                                index: i
+                            }));
+                        },
+                        font: { size: 11 },
+                        padding: 10
+                    }
+                },
+                tooltip: {
+                    callbacks: {
+                        label: ctx => {
+                            const pct = total > 0 ? (ctx.raw / total * 100).toFixed(1) : 0;
+                            return ` ${ctx.label}: ${formatEUR(ctx.raw)} (${pct}%)`;
+                        }
+                    }
+                }
+            }
+        }
+    });
 }
+
+// ── Patrimônio trend (line chart) ─────────────────────────────────────────────
+
+function _renderPatrimonioChart(data) {
+    const noData  = document.getElementById('patrimonio-chart-no-data');
+    const wrapper = document.getElementById('patrimonio-chart-wrapper');
+
+    if (_patrimonioChart) { _patrimonioChart.destroy(); _patrimonioChart = null; }
+
+    const history = _computePatrimonioHistory(data);
+
+    if (history.length < 2) {
+        noData.style.display  = '';
+        wrapper.style.display = 'none';
+        return;
+    }
+
+    noData.style.display  = 'none';
+    wrapper.style.display = '';
+
+    _patrimonioChart = new Chart(document.getElementById('patrimonio-chart'), {
+        type: 'line',
+        data: {
+            labels: history.map(h => _shortMonthLabel(h.month)),
+            datasets: [{
+                label: 'Patrimônio',
+                data: history.map(h => h.balance),
+                borderColor: '#198754',
+                backgroundColor: 'rgba(25, 135, 84, 0.07)',
+                fill: true,
+                tension: 0.35,
+                pointRadius: 4,
+                pointHoverRadius: 6,
+                pointBackgroundColor: '#198754',
+                pointBorderColor: '#fff',
+                pointBorderWidth: 2
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    callbacks: { label: ctx => ` ${formatEUR(ctx.raw)}` }
+                }
+            },
+            scales: {
+                y: {
+                    ticks: { callback: val => formatEUR(val), maxTicksLimit: 5 },
+                    grid: { color: 'rgba(0,0,0,0.05)' }
+                },
+                x: { grid: { display: false } }
+            }
+        }
+    });
+}
+
+function _computePatrimonioHistory(data) {
+    // Collect all months from ALL transactions (not capped) plus current month
+    const allMonthsSet = new Set();
+    const { year, month } = currentYearMonth();
+    allMonthsSet.add(monthToParam(year, month));
+    data.transactions.forEach(t => {
+        const d = txDateYearMonth(t.date);
+        allMonthsSet.add(monthToParam(d.year, d.month));
+    });
+
+    const allSorted = [...allMonthsSet].sort();
+
+    // Compute net per month for all months
+    const netByMonth = {};
+    allSorted.forEach(m => { netByMonth[m] = 0; });
+    data.transactions.forEach(t => {
+        const d   = txDateYearMonth(t.date);
+        const key = monthToParam(d.year, d.month);
+        netByMonth[key] += t.type === 'income' ? t.amount : -t.amount;
+    });
+
+    const currentTotal = data.accounts.reduce((s, a) => s + (a.balance || 0), 0);
+
+    // Reconstruct backwards from current balance
+    const fullHistory = [];
+    let bal = currentTotal;
+    for (let i = allSorted.length - 1; i >= 0; i--) {
+        fullHistory.unshift({ month: allSorted[i], balance: bal });
+        if (i > 0) bal -= netByMonth[allSorted[i]];
+    }
+
+    // Return last 12 months
+    return fullHistory.slice(-12);
+}
+
+// ── Monthly income vs expenses bar chart ──────────────────────────────────────
+
+function _renderMonthlyChart(data) {
+    const noData  = document.getElementById('monthly-chart-no-data');
+    const wrapper = document.getElementById('monthly-chart-wrapper');
+
+    if (_monthlyChart) { _monthlyChart.destroy(); _monthlyChart = null; }
+
+    if (data.transactions.length === 0) {
+        noData.style.display  = '';
+        wrapper.style.display = 'none';
+        return;
+    }
+
+    const months          = _getRelevantMonths(data, 12);
+    const incomeByMonth   = {};
+    const expensesByMonth = {};
+    months.forEach(m => { incomeByMonth[m] = 0; expensesByMonth[m] = 0; });
+
+    data.transactions.forEach(t => {
+        const d   = txDateYearMonth(t.date);
+        const key = monthToParam(d.year, d.month);
+        if (!Object.prototype.hasOwnProperty.call(incomeByMonth, key)) return;
+        if (t.type === 'income') incomeByMonth[key]   += t.amount;
+        else                     expensesByMonth[key] += t.amount;
+    });
+
+    noData.style.display  = 'none';
+    wrapper.style.display = '';
+
+    _monthlyChart = new Chart(document.getElementById('monthly-chart'), {
+        type: 'bar',
+        data: {
+            labels: months.map(_shortMonthLabel),
+            datasets: [
+                {
+                    label: 'Income',
+                    data: months.map(m => incomeByMonth[m]),
+                    backgroundColor: 'rgba(25, 135, 84, 0.75)',
+                    borderColor: '#198754',
+                    borderWidth: 1,
+                    borderRadius: 4
+                },
+                {
+                    label: 'Expenses',
+                    data: months.map(m => expensesByMonth[m]),
+                    backgroundColor: 'rgba(220, 53, 69, 0.75)',
+                    borderColor: '#dc3545',
+                    borderWidth: 1,
+                    borderRadius: 4
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                tooltip: {
+                    callbacks: {
+                        label: ctx => ` ${ctx.dataset.label}: ${formatEUR(ctx.raw)}`
+                    }
+                }
+            },
+            scales: {
+                y: {
+                    ticks: { callback: val => formatEUR(val), maxTicksLimit: 5 },
+                    grid: { color: 'rgba(0,0,0,0.05)' }
+                },
+                x: { grid: { display: false } }
+            }
+        }
+    });
+}
+
+// ── Monthly history table ─────────────────────────────────────────────────────
+
+function _renderMonthlyHistory(data) {
+    const container = document.getElementById('monthly-history-container');
+
+    const { year: cy, month: cm } = currentYearMonth();
+    const currentParam            = monthToParam(cy, cm);
+    const months                  = _getRelevantMonths(data, 24).slice().reverse();
+
+    const rows = months.map(m => {
+        const [y, mo] = m.split('-').map(Number);
+        const txs     = data.transactions.filter(t => {
+            const d = txDateYearMonth(t.date);
+            return monthToParam(d.year, d.month) === m;
+        });
+        const income   = txs.filter(t => t.type === 'income').reduce((s, t)  => s + t.amount, 0);
+        const expenses = txs.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0);
+        const net      = income - expenses;
+        const savings  = income > 0 ? (net / income * 100).toFixed(0) : null;
+        return { m, year: y, month: mo, income, expenses, net, savings, txCount: txs.length };
+    }).filter(r => r.txCount > 0 || r.m === currentParam);
+
+    if (rows.length === 0) {
+        container.innerHTML = '<p class="text-muted p-3 mb-0">No history yet.</p>';
+        return;
+    }
+
+    container.innerHTML = `
+        <div class="table-responsive">
+            <table class="table table-sm table-hover align-middle mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>Month</th>
+                        <th class="text-end">Income</th>
+                        <th class="text-end">Expenses</th>
+                        <th class="text-end">Net</th>
+                        <th class="text-end d-none d-sm-table-cell">Savings rate</th>
+                        <th class="text-end d-none d-md-table-cell">Transactions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${rows.map(r => `
+                        <tr>
+                            <td>
+                                <a href="transactions.html?month=${r.m}" class="fw-semibold text-decoration-none">
+                                    ${formatMonth(r.year, r.month)}
+                                </a>
+                            </td>
+                            <td class="text-end text-success">${formatEUR(r.income)}</td>
+                            <td class="text-end text-danger">${formatEUR(r.expenses)}</td>
+                            <td class="text-end fw-semibold ${r.net >= 0 ? 'text-success' : 'text-danger'}">
+                                ${r.net >= 0 ? '+' : ''}${formatEUR(r.net)}
+                            </td>
+                            <td class="text-end d-none d-sm-table-cell text-muted">
+                                ${r.savings !== null ? `${r.savings}%` : '—'}
+                            </td>
+                            <td class="text-end d-none d-md-table-cell text-muted small">${r.txCount}</td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+            </table>
+        </div>`;
+}
+
+// ── Recent transactions ───────────────────────────────────────────────────────
 
 function _renderRecentTransactions(data) {
     const container = document.getElementById('recent-transactions');
@@ -147,6 +427,8 @@ function _renderRecentTransactions(data) {
     </ul>`;
 }
 
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
 function _monthTransactions(data, year, month) {
     return data.transactions.filter(t => {
         const d = txDateYearMonth(t.date);
@@ -154,12 +436,30 @@ function _monthTransactions(data, year, month) {
     });
 }
 
+function _getRelevantMonths(data, limit = 12) {
+    const set = new Set();
+    const { year, month } = currentYearMonth();
+    set.add(monthToParam(year, month));
+    data.transactions.forEach(t => {
+        const d = txDateYearMonth(t.date);
+        set.add(monthToParam(d.year, d.month));
+    });
+    return [...set].sort().slice(-limit);
+}
+
+function _shortMonthLabel(monthParam) {
+    const [y, m] = monthParam.split('-').map(Number);
+    return new Date(y, m - 1, 1).toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
+}
+
+// ── Edit balance modal ────────────────────────────────────────────────────────
+
 function openEditBalance(accountId) {
     const data = getData();
     const acc  = data.accounts.find(a => a.id === accountId);
     if (!acc) return;
-    document.getElementById('balance-account-id').value = accountId;
-    document.getElementById('balance-input').value      = acc.balance || 0;
+    document.getElementById('balance-account-id').value     = accountId;
+    document.getElementById('balance-input').value          = acc.balance || 0;
     document.getElementById('edit-balance-name').textContent = acc.name;
     _editBalanceModal.show();
 }
